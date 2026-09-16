@@ -8,7 +8,8 @@ export interface Task {
   status: string;
   position: number;
   created_at: string;
-  user_id: string; // Nova coluna adicionada
+  user_id: string;
+  tag: string | null; // Nova coluna
 }
 
 interface TaskStore {
@@ -19,8 +20,8 @@ interface TaskStore {
   logout: () => Promise<void>;
   fetchTasks: () => Promise<void>;
   subscribeToTasks: () => () => void;
-  addTask: (title: string, description: string) => Promise<void>;
-  updateTask: (taskId: string, title: string, description: string) => Promise<void>;
+  addTask: (title: string, description: string, tag: string) => Promise<void>;
+  updateTask: (taskId: string, title: string, description: string, tag: string) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
   updateTasksOrder: (newTasks: Task[]) => Promise<void>;
 }
@@ -30,7 +31,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   user: null,
   loading: false,
 
-  // Verifica se o usuário está logado e escuta mudanças na sessão
   checkAuth: async () => {
     const { data: { session } } = await supabase.auth.getSession();
     set({ user: session?.user || null });
@@ -38,9 +38,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     supabase.auth.onAuthStateChange((_event, session) => {
       set({ user: session?.user || null });
       if (session?.user) {
-        get().fetchTasks(); // Se logar, busca as tarefas dele
+        get().fetchTasks();
       } else {
-        set({ tasks: [] }); // Se deslogar, limpa o quadro
+        set({ tasks: [] });
       }
     });
   },
@@ -51,7 +51,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   fetchTasks: async () => {
     const user = get().user;
-    if (!user) return; // Só busca se estiver logado
+    if (!user) return;
 
     set({ loading: true });
     const { data, error } = await supabase
@@ -83,7 +83,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     };
   },
 
-  addTask: async (title: string, description: string) => {
+  addTask: async (title: string, description: string, tag: string) => {
     const user = get().user;
     if (!user) return;
 
@@ -95,24 +95,25 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           description: description || null,
           status: 'todo',
           position: get().tasks.filter(t => t.status === 'todo').length,
-          user_id: user.id, // Vincula a tarefa ao usuário logado!
+          user_id: user.id,
+          tag: tag || null,
         },
       ]);
 
     if (error) console.error('Erro ao criar tarefa:', error);
   },
 
-  updateTask: async (taskId: string, title: string, description: string) => {
+  updateTask: async (taskId: string, title: string, description: string, tag: string) => {
     const previousTasks = get().tasks;
     set({
       tasks: previousTasks.map((t) =>
-        t.id === taskId ? { ...t, title, description } : t
+        t.id === taskId ? { ...t, title, description, tag: tag || null } : t
       ),
     });
 
     const { error } = await supabase
       .from('tasks')
-      .update({ title, description: description || null })
+      .update({ title, description: description || null, tag: tag || null })
       .eq('id', taskId);
 
     if (error) {
@@ -140,13 +141,14 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
     set({ tasks: newTasks });
 
-    const payload = newTasks.map(({ id, title, description, status, position }) => ({
+    const payload = newTasks.map(({ id, title, description, status, position, tag }) => ({
       id,
       title,
       description,
       status,
       position,
-      user_id: user.id, // O upsert precisa de todos os dados não-nulos
+      tag,
+      user_id: user.id,
     }));
 
     const { error } = await supabase.from('tasks').upsert(payload);

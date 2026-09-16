@@ -7,7 +7,6 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-// Importando os novos componentes de Auth
 import LoginForm from '@/components/auth/LoginForm';
 import SignUpForm from '@/components/auth/SignUpForm';
 
@@ -17,11 +16,35 @@ const COLUMNS = [
   { id: 'done', label: 'Done' },
 ];
 
+const TAG_COLORS: Record<string, string> = {
+  'Urgente': 'bg-red-500/10 text-red-500 border-red-500/20',
+  'Bug': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+  'Feature': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+  'Melhoria': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+};
+
+const TAG_OPTIONS = [
+  { value: '', label: 'Sem tag' },
+  { value: 'Urgente', label: 'Urgente' },
+  { value: 'Bug', label: 'Bug' },
+  { value: 'Feature', label: 'Feature' },
+  { value: 'Melhoria', label: 'Melhoria' },
+];
+
 // --- COMPONENTES AUXILIARES DO KANBAN ---
 
 function TaskCardUI({ task, isDragging, onEdit, onDelete }: { task: Task; isDragging?: boolean; onEdit?: (task: Task) => void; onDelete?: (taskId: string) => void; }) {
   return (
     <div className={`group bg-zinc-800/60 p-4 rounded-xl border ${isDragging ? 'border-zinc-500 shadow-xl scale-105 opacity-90' : 'border-zinc-700/50 shadow-sm'} transition-colors duration-200 cursor-grab active:cursor-grabbing hover:border-zinc-500 hover:bg-zinc-800 relative`}>
+      
+      {task.tag && (
+        <div className="mb-3">
+          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md border ${TAG_COLORS[task.tag] || 'bg-zinc-700/50 text-zinc-300 border-zinc-600'}`}>
+            {task.tag}
+          </span>
+        </div>
+      )}
+
       <div className="flex justify-between items-start gap-2">
         <h3 className="font-medium text-sm text-zinc-100 break-words">{task.title}</h3>
         {!isDragging && onEdit && onDelete && (
@@ -80,21 +103,20 @@ function Column({ col, tasks, loading, onEdit, onDelete }: { col: any; tasks: Ta
 export default function Home() {
   const { user, checkAuth, logout, tasks, loading, fetchTasks, subscribeToTasks, addTask, updateTask, deleteTask, updateTasksOrder } = useTaskStore();
   
-  // Estado para alternar entre Login e Cadastro
   const [isLoginMode, setIsLoginMode] = useState(true);
 
   // Estados do Kanban
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [tag, setTag] = useState('');
+  const [isTagMenuOpen, setIsTagMenuOpen] = useState(false); // Estado para o novo Dropdown Customizado
+  
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
 
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
-
+  useEffect(() => { checkAuth(); }, [checkAuth]);
   useEffect(() => {
     if (user) {
       const unsubscribe = subscribeToTasks();
@@ -102,16 +124,36 @@ export default function Home() {
     }
   }, [user, subscribeToTasks]);
 
-  const handleOpenNewTask = () => { setEditingTask(null); setTitle(''); setDescription(''); setIsOpen(true); };
-  const handleEditTask = (task: Task) => { setEditingTask(task); setTitle(task.title); setDescription(task.description || ''); setIsOpen(true); };
+  const handleOpenNewTask = () => { 
+    setEditingTask(null); 
+    setTitle(''); 
+    setDescription(''); 
+    setTag(''); 
+    setIsTagMenuOpen(false);
+    setIsOpen(true); 
+  };
+
+  const handleEditTask = (task: Task) => { 
+    setEditingTask(task); 
+    setTitle(task.title); 
+    setDescription(task.description || ''); 
+    setTag(task.tag || ''); 
+    setIsTagMenuOpen(false);
+    setIsOpen(true); 
+  };
+  
   const handleDeleteClick = (taskId: string) => setTaskToDelete(taskId);
   const confirmDelete = async () => { if (taskToDelete) { await deleteTask(taskToDelete); setTaskToDelete(null); } };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    if (editingTask) { await updateTask(editingTask.id, title, description); } 
-    else { await addTask(title, description); }
+    
+    if (editingTask) { 
+      await updateTask(editingTask.id, title, description, tag); 
+    } else { 
+      await addTask(title, description, tag); 
+    }
     setIsOpen(false);
   };
 
@@ -164,22 +206,15 @@ export default function Home() {
     updateTasksOrder(finalTasks);
   };
 
-  // --- RENDERIZAÇÃO: DESLOGADO ---
   if (!user) {
     return (
       <main className="min-h-screen bg-zinc-950 flex items-center justify-center p-4 font-sans relative overflow-hidden">
         <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-800/40 via-zinc-950 to-zinc-950" />
-        
-        {isLoginMode ? (
-          <LoginForm onSwitchMode={() => setIsLoginMode(false)} />
-        ) : (
-          <SignUpForm onSwitchMode={() => setIsLoginMode(true)} />
-        )}
+        {isLoginMode ? <LoginForm onSwitchMode={() => setIsLoginMode(false)} /> : <SignUpForm onSwitchMode={() => setIsLoginMode(true)} />}
       </main>
     );
   }
 
-  // --- RENDERIZAÇÃO: LOGADO ---
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 p-8 font-sans overflow-hidden relative">
       <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-800/40 via-zinc-950 to-zinc-950" />
@@ -214,19 +249,67 @@ export default function Home() {
         </DndContext>
       </div>
 
+      {/* Modal de Criação/Edição */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <h2 className="text-xl font-bold text-zinc-100 mb-4">{editingTask ? 'Editar Tarefa' : 'Criar Nova Tarefa'}</h2>
+            
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1">Título</label>
                 <input type="text" required value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-zinc-800/80 border border-zinc-700/80 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-400 transition-colors" />
               </div>
+
+              {/* Dropdown Customizado Super Premium */}
+              <div className="relative">
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Tag (Opcional)</label>
+                <div 
+                  className="w-full bg-zinc-800/80 border border-zinc-700/80 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-400 transition-colors cursor-pointer flex justify-between items-center"
+                  onClick={() => setIsTagMenuOpen(!isTagMenuOpen)}
+                >
+                  <span className="flex items-center gap-2">
+                    {tag ? (
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${TAG_COLORS[tag]}`}>
+                        {tag}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-500">Selecione uma tag</span>
+                    )}
+                  </span>
+                  <svg className={`w-4 h-4 text-zinc-400 transition-transform ${isTagMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
+                
+                {isTagMenuOpen && (
+                  <div className="absolute z-10 w-full mt-2 bg-zinc-800 border border-zinc-700/80 rounded-xl shadow-xl overflow-hidden p-1">
+                    {TAG_OPTIONS.map((option) => (
+                      <div 
+                        key={option.value}
+                        className="px-3 py-2 text-sm text-zinc-100 hover:bg-zinc-700/50 cursor-pointer rounded-lg transition-colors flex items-center"
+                        onClick={() => {
+                          setTag(option.value);
+                          setIsTagMenuOpen(false);
+                        }}
+                      >
+                        {option.value ? (
+                          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${TAG_COLORS[option.value]}`}>
+                            {option.label}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400">Sem tag</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1">Descrição</label>
                 <textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} className="w-full bg-zinc-800/80 border border-zinc-700/80 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-400 transition-colors resize-none" />
               </div>
+
               <div className="flex justify-end gap-3 mt-2">
                 <button type="button" onClick={() => setIsOpen(false)} className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors">Cancelar</button>
                 <button type="submit" className="bg-zinc-100 hover:bg-white text-zinc-900 font-semibold px-4 py-2 rounded-xl text-xs transition-all shadow-md">{editingTask ? 'Salvar Alterações' : 'Criar Tarefa'}</button>
@@ -236,6 +319,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* Modal de Exclusão (Inalterado) */}
       {taskToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150 text-center">
