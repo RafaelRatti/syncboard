@@ -16,9 +16,9 @@ interface TaskStore {
   fetchTasks: () => Promise<void>;
   subscribeToTasks: () => () => void;
   addTask: (title: string, description: string) => Promise<void>;
-  moveTask: (taskId: string, newStatus: string) => Promise<void>;
   updateTask: (taskId: string, title: string, description: string) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
+  updateTasksOrder: (newTasks: Task[]) => Promise<void>; // Nova função
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
@@ -64,38 +64,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           title,
           description: description || null,
           status: 'todo',
-          position: get().tasks.length,
+          position: get().tasks.filter(t => t.status === 'todo').length,
         },
       ]);
 
-    if (error) {
-      console.error('Erro ao criar tarefa:', error);
-    }
-  },
-
-  moveTask: async (taskId: string, newStatus: string) => {
-    const previousTasks = get().tasks;
-    set({
-      tasks: previousTasks.map((t) =>
-        t.id === taskId ? { ...t, status: newStatus } : t
-      ),
-    });
-
-    const { error } = await supabase
-      .from('tasks')
-      .update({ status: newStatus })
-      .eq('id', taskId);
-
-    if (error) {
-      console.error('Erro ao mover tarefa:', error);
-      set({ tasks: previousTasks });
-    }
+    if (error) console.error('Erro ao criar tarefa:', error);
   },
 
   updateTask: async (taskId: string, title: string, description: string) => {
     const previousTasks = get().tasks;
-    
-    // Atualização Otimista na Interface
     set({
       tasks: previousTasks.map((t) =>
         t.id === taskId ? { ...t, title, description } : t
@@ -115,20 +92,39 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   deleteTask: async (taskId: string) => {
     const previousTasks = get().tasks;
-    
-    // Atualização Otimista na Interface
     set({
       tasks: previousTasks.filter((t) => t.id !== taskId),
     });
 
-    const { error } = await supabase
-      .from('tasks')
-      .delete()
-      .eq('id', taskId);
+    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
 
     if (error) {
       console.error('Erro ao deletar tarefa:', error);
       set({ tasks: previousTasks });
+    }
+  },
+
+  // Recebe o array reorganizado e salva no banco de dados de uma vez só
+  updateTasksOrder: async (newTasks: Task[]) => {
+    const previousTasks = get().tasks;
+    
+    // Atualização Otimista na Interface
+    set({ tasks: newTasks });
+
+    // Prepara os dados para o upsert (atualização em massa)
+    const payload = newTasks.map(({ id, title, description, status, position }) => ({
+      id,
+      title,
+      description,
+      status,
+      position,
+    }));
+
+    const { error } = await supabase.from('tasks').upsert(payload);
+
+    if (error) {
+      console.error('Erro ao reordenar tarefas:', error);
+      set({ tasks: previousTasks }); // Se falhar, reverte
     }
   },
 }));

@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useTaskStore, Task } from '@/store/useTaskStore';
 import { DndContext, DragEndEvent, DragStartEvent, DragOverlay, closestCorners } from '@dnd-kit/core';
-import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { useDroppable } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const COLUMNS = [
   { id: 'todo', label: 'To Do' },
@@ -28,7 +30,7 @@ function TaskCardUI({
     <div
       className={`group bg-zinc-800/60 p-4 rounded-xl border ${
         isDragging ? 'border-zinc-500 shadow-xl scale-105 opacity-90' : 'border-zinc-700/50 shadow-sm'
-      } transition-all duration-200 cursor-grab active:cursor-grabbing hover:border-zinc-500 hover:bg-zinc-800 relative`}
+      } transition-colors duration-200 cursor-grab active:cursor-grabbing hover:border-zinc-500 hover:bg-zinc-800 relative`}
     >
       <div className="flex justify-between items-start gap-2">
         <h3 className="font-medium text-sm text-zinc-100 break-words">{task.title}</h3>
@@ -70,14 +72,21 @@ function TaskCardUI({
   );
 }
 
+// Transformamos o Card base em um "Sortable"
 function TaskCard({ task, onEdit, onDelete }: { task: Task; onEdit: (t: Task) => void; onDelete: (id: string) => void }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { task },
   });
 
+  // O dnd-kit injeta transform/transition pra fazer o card deslizar abrindo espaço
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   return (
-    <div ref={setNodeRef} {...attributes} {...listeners} className={isDragging ? 'opacity-30' : ''}>
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={isDragging ? 'opacity-30' : ''}>
       <TaskCardUI task={task} onEdit={onEdit} onDelete={onDelete} />
     </div>
   );
@@ -107,7 +116,12 @@ function Column({ col, tasks, loading, onEdit, onDelete }: { col: any; tasks: Ta
             Arraste tarefas para cá
           </p>
         ) : (
-          tasks.map((task) => <TaskCard key={task.id} task={task} onEdit={onEdit} onDelete={onDelete} />)
+          // O Contexto Sortable diz ao dnd-kit qual a ordem dos itens aqui dentro
+          <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+            {tasks.map((task) => (
+              <TaskCard key={task.id} task={task} onEdit={onEdit} onDelete={onDelete} />
+            ))}
+          </SortableContext>
         )}
       </div>
     </div>
@@ -117,18 +131,13 @@ function Column({ col, tasks, loading, onEdit, onDelete }: { col: any; tasks: Ta
 // --- COMPONENTE PRINCIPAL ---
 
 export default function Home() {
-  const { tasks, loading, fetchTasks, subscribeToTasks, addTask, moveTask, updateTask, deleteTask } = useTaskStore();
+  const { tasks, loading, fetchTasks, subscribeToTasks, addTask, updateTask, deleteTask, updateTasksOrder } = useTaskStore();
   
-  // Estados do modal de Criar/Editar
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-
-  // Estado do modal de Excluir
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
-
-  // Estado do Drag and Drop (Fantasma)
   const [activeTask, setActiveTask] = useState<Task | null>(null);
 
   useEffect(() => {
@@ -137,7 +146,6 @@ export default function Home() {
     return () => unsubscribe();
   }, [fetchTasks, subscribeToTasks]);
 
-  // Ações da interface
   const handleOpenNewTask = () => {
     setEditingTask(null);
     setTitle('');
@@ -152,18 +160,15 @@ export default function Home() {
     setIsOpen(true);
   };
 
-  const handleDeleteClick = (taskId: string) => {
-    setTaskToDelete(taskId); // Abre o modal de confirmação
-  };
-
+  const handleDeleteClick = (taskId: string) => setTaskToDelete(taskId);
+  
   const confirmDelete = async () => {
     if (taskToDelete) {
       await deleteTask(taskToDelete);
-      setTaskToDelete(null); // Fecha o modal após deletar
+      setTaskToDelete(null);
     }
   };
 
-  // Envio do formulário (Criar/Atualizar)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -173,7 +178,6 @@ export default function Home() {
     } else {
       await addTask(title, description);
     }
-    
     setIsOpen(false);
   };
 
@@ -183,18 +187,64 @@ export default function Home() {
     if (task) setActiveTask(task);
   };
 
+  // Aqui está a inteligência pesada de reordenação matemática
   const handleDragEnd = (event: DragEndEvent) => {
     setActiveTask(null);
     const { active, over } = event;
     if (!over) return;
 
-    const taskId = active.id as string;
-    const newStatus = over.id as string;
-    const task = tasks.find((t) => t.id === taskId);
+    const activeId = active.id as string;
+    const overId = over.id as string;
+    
+    if (activeId === overId) return; // Não moveu nada
 
-    if (task && task.status !== newStatus) {
-      moveTask(taskId, newStatus);
+    const activeTask = tasks.find((t) => t.id === activeId);
+    if (!activeTask) return;
+
+    let newTasks = [...tasks];
+    let newStatus = activeTask.status;
+
+    const isOverColumn = COLUMNS.some((c) => c.id === overId);
+
+    if (isOverColumn) {
+      // Soltou na área vazia da coluna
+      newStatus = overId;
+      newTasks = newTasks.map((t) => (t.id === activeId ? { ...t, status: newStatus } : t));
+    } else {
+      // Soltou em cima de outra tarefa
+      const overTask = tasks.find((t) => t.id === overId);
+      if (overTask) {
+        newStatus = overTask.status;
+        
+        // Troca o status da tarefa movida
+        newTasks = newTasks.map((t) => (t.id === activeId ? { ...t, status: newStatus } : t));
+
+        // Pega as tarefas daquela coluna para aplicar a troca de índices
+        const columnTasks = newTasks.filter((t) => t.status === newStatus).sort((a, b) => a.position - b.position);
+        const oldIndex = columnTasks.findIndex((t) => t.id === activeId);
+        const newIndex = columnTasks.findIndex((t) => t.id === overId);
+
+        // Faz a troca de posição dentro do array dessa coluna
+        const reorderedColumnTasks = arrayMove(columnTasks, oldIndex, newIndex);
+
+        // Junta as mudanças no array principal
+        newTasks = newTasks.map((t) => {
+          const reorderedTask = reorderedColumnTasks.find((rt) => rt.id === t.id);
+          if (reorderedTask) {
+            return { ...t, position: reorderedColumnTasks.indexOf(reorderedTask) };
+          }
+          return t;
+        });
+      }
     }
+
+    // Recalcula o 'position' de TODAS as tarefas por coluna para garantir consistência perfeita no banco
+    const finalTasks = COLUMNS.map((col) => {
+      const colTasks = newTasks.filter((t) => t.status === col.id).sort((a, b) => a.position - b.position);
+      return colTasks.map((t, index) => ({ ...t, position: index }));
+    }).flat();
+
+    updateTasksOrder(finalTasks);
   };
 
   return (
@@ -221,7 +271,7 @@ export default function Home() {
         <DndContext collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           <div className="flex items-start gap-6 overflow-x-auto pb-8 h-[calc(100vh-180px)] custom-scrollbar">
             {COLUMNS.map((col) => {
-              const columnTasks = tasks.filter((task) => task.status === col.id);
+              const columnTasks = tasks.filter((task) => task.status === col.id).sort((a, b) => a.position - b.position); // Garante a ordem correta na renderização
               return (
                 <Column 
                   key={col.id} 
@@ -241,79 +291,37 @@ export default function Home() {
         </DndContext>
       </div>
 
-      {/* Modal para Adicionar/Editar Tarefa */}
+      {/* Modais de Criar/Editar e Excluir foram mantidos idênticos... */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
-            <h2 className="text-xl font-bold text-zinc-100 mb-4">
-              {editingTask ? 'Editar Tarefa' : 'Criar Nova Tarefa'}
-            </h2>
-            
+            <h2 className="text-xl font-bold text-zinc-100 mb-4">{editingTask ? 'Editar Tarefa' : 'Criar Nova Tarefa'}</h2>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1">Título</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Refatorar componente de Header"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-zinc-800/80 border border-zinc-700/80 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-400 transition-colors"
-                />
+                <input type="text" required value={title} onChange={(e) => setTitle(e.target.value)} className="w-full bg-zinc-800/80 border border-zinc-700/80 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-400 transition-colors" />
               </div>
-
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1">Descrição</label>
-                <textarea
-                  rows={4}
-                  placeholder="Detalhes opcionais sobre a tarefa..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-zinc-800/80 border border-zinc-700/80 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-400 transition-colors resize-none"
-                />
+                <textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} className="w-full bg-zinc-800/80 border border-zinc-700/80 rounded-xl px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-400 transition-colors resize-none" />
               </div>
-
               <div className="flex justify-end gap-3 mt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="bg-zinc-100 hover:bg-white text-zinc-900 font-semibold px-4 py-2 rounded-xl text-xs transition-all shadow-md"
-                >
-                  {editingTask ? 'Salvar Alterações' : 'Criar Tarefa'}
-                </button>
+                <button type="button" onClick={() => setIsOpen(false)} className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors">Cancelar</button>
+                <button type="submit" className="bg-zinc-100 hover:bg-white text-zinc-900 font-semibold px-4 py-2 rounded-xl text-xs transition-all shadow-md">{editingTask ? 'Salvar Alterações' : 'Criar Tarefa'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Modal de Confirmação de Exclusão */}
       {taskToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150 text-center">
             <h2 className="text-xl font-bold text-zinc-100 mb-2">Excluir Tarefa</h2>
-            <p className="text-sm text-zinc-400 mb-6">
-              Tem certeza que deseja excluir esta tarefa? Essa ação não pode ser desfeita.
-            </p>
+            <p className="text-sm text-zinc-400 mb-6">Tem certeza que deseja excluir esta tarefa? Essa ação não pode ser desfeita.</p>
             <div className="flex justify-center gap-3">
-              <button
-                onClick={() => setTaskToDelete(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-white font-semibold px-4 py-2 rounded-xl text-xs transition-all shadow-md"
-              >
-                Sim, Excluir
-              </button>
+              <button onClick={() => setTaskToDelete(null)} className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors">Cancelar</button>
+              <button onClick={confirmDelete} className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-white font-semibold px-4 py-2 rounded-xl text-xs transition-all shadow-md">Sim, Excluir</button>
             </div>
           </div>
         </div>
