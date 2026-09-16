@@ -9,7 +9,7 @@ export interface Task {
   position: number;
   created_at: string;
   user_id: string;
-  tag: string | null; // Nova coluna
+  tag: string | null;
 }
 
 interface TaskStore {
@@ -18,6 +18,7 @@ interface TaskStore {
   loading: boolean;
   checkAuth: () => Promise<void>;
   logout: () => Promise<void>;
+  updateProfile: (name: string) => Promise<void>; // Nova função
   fetchTasks: () => Promise<void>;
   subscribeToTasks: () => () => void;
   addTask: (title: string, description: string, tag: string) => Promise<void>;
@@ -47,6 +48,19 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   logout: async () => {
     await supabase.auth.signOut();
+  },
+
+  // Nova função para atualizar os metadados do usuário
+  updateProfile: async (name: string) => {
+    const { data, error } = await supabase.auth.updateUser({
+      data: { full_name: name }
+    });
+
+    if (!error && data.user) {
+      set({ user: data.user }); // Atualiza o estado global na hora
+    } else {
+      console.error('Erro ao atualizar perfil:', error);
+    }
   },
 
   fetchTasks: async () => {
