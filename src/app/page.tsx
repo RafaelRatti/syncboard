@@ -13,7 +13,6 @@ const COLUMNS = [
 
 // --- COMPONENTES AUXILIARES ---
 
-// 1. Interface (visual) do Card com botões de Editar/Excluir
 function TaskCardUI({
   task,
   isDragging,
@@ -34,11 +33,10 @@ function TaskCardUI({
       <div className="flex justify-between items-start gap-2">
         <h3 className="font-medium text-sm text-zinc-100 break-words">{task.title}</h3>
         
-        {/* Ações (Editar/Excluir) - Só aparecem no hover e não no fantasma (isDragging) */}
         {!isDragging && onEdit && onDelete && (
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
-              onPointerDown={(e) => e.stopPropagation()} // Impede o drag
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 onEdit(task);
@@ -49,7 +47,7 @@ function TaskCardUI({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             </button>
             <button
-              onPointerDown={(e) => e.stopPropagation()} // Impede o drag
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(task.id);
@@ -72,7 +70,6 @@ function TaskCardUI({
   );
 }
 
-// 2. O wrapper Draggable
 function TaskCard({ task, onEdit, onDelete }: { task: Task; onEdit: (t: Task) => void; onDelete: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
@@ -86,7 +83,6 @@ function TaskCard({ task, onEdit, onDelete }: { task: Task; onEdit: (t: Task) =>
   );
 }
 
-// 3. A Coluna Droppable
 function Column({ col, tasks, loading, onEdit, onDelete }: { col: any; tasks: Task[]; loading: boolean; onEdit: (t: Task) => void; onDelete: (id: string) => void }) {
   const { setNodeRef, isOver } = useDroppable({
     id: col.id,
@@ -123,12 +119,16 @@ function Column({ col, tasks, loading, onEdit, onDelete }: { col: any; tasks: Ta
 export default function Home() {
   const { tasks, loading, fetchTasks, subscribeToTasks, addTask, moveTask, updateTask, deleteTask } = useTaskStore();
   
-  // Estados do modal
+  // Estados do modal de Criar/Editar
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [editingTask, setEditingTask] = useState<Task | null>(null); // Novo estado
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
 
+  // Estado do modal de Excluir
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+
+  // Estado do Drag and Drop (Fantasma)
   const [activeTask, setActiveTask] = useState<Task | null>(null);
 
   useEffect(() => {
@@ -152,13 +152,18 @@ export default function Home() {
     setIsOpen(true);
   };
 
-  const handleDeleteTask = async (taskId: string) => {
-    if (window.confirm('Tem certeza que deseja excluir esta tarefa?')) {
-      await deleteTask(taskId);
+  const handleDeleteClick = (taskId: string) => {
+    setTaskToDelete(taskId); // Abre o modal de confirmação
+  };
+
+  const confirmDelete = async () => {
+    if (taskToDelete) {
+      await deleteTask(taskToDelete);
+      setTaskToDelete(null); // Fecha o modal após deletar
     }
   };
 
-  // Envio do formulário (serve para criar ou atualizar)
+  // Envio do formulário (Criar/Atualizar)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -224,7 +229,7 @@ export default function Home() {
                   tasks={columnTasks} 
                   loading={loading} 
                   onEdit={handleEditTask}
-                  onDelete={handleDeleteTask}
+                  onDelete={handleDeleteClick}
                 />
               );
             })}
@@ -236,6 +241,7 @@ export default function Home() {
         </DndContext>
       </div>
 
+      {/* Modal para Adicionar/Editar Tarefa */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
@@ -283,6 +289,32 @@ export default function Home() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão */}
+      {taskToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150 text-center">
+            <h2 className="text-xl font-bold text-zinc-100 mb-2">Excluir Tarefa</h2>
+            <p className="text-sm text-zinc-400 mb-6">
+              Tem certeza que deseja excluir esta tarefa? Essa ação não pode ser desfeita.
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={() => setTaskToDelete(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-white font-semibold px-4 py-2 rounded-xl text-xs transition-all shadow-md"
+              >
+                Sim, Excluir
+              </button>
+            </div>
           </div>
         </div>
       )}
